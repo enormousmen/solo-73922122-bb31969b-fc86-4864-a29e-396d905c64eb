@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>单卷恢复控制台</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+         margin: 0; background: #f4f6fa; color: #1f2733; }
+  header { background: #1f3a5f; color: #fff; padding: 14px 22px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header small { font-weight: normal; opacity: .8; margin-left: 10px; }
+  main { padding: 16px 22px 40px; max-width: 1180px; margin: 0 auto; }
+  .cards { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+  .card { background: #fff; border-radius: 8px; padding: 10px 16px; min-width: 108px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.08); text-align: center; }
+  .card .num { font-size: 22px; font-weight: 700; }
+  .card .lbl { font-size: 12px; color: #68758a; margin-top: 2px; }
+  .bar { height: 14px; background: #dde3ec; border-radius: 7px; overflow: hidden; margin: 6px 0 14px; }
+  #bar-fill { height: 100%; width: 0; background: linear-gradient(90deg,#4caf50,#2e7d32);
+              transition: width .3s; }
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  button { border: 0; border-radius: 6px; padding: 8px 16px; font-size: 14px; cursor: pointer;
+           background: #1f6feb; color: #fff; }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.warn { background: #d97706; }
+  button.danger { background: #b3261e; }
+  button.ghost { background: #5b6b82; }
+  #msg { font-size: 13px; color: #37475e; }
+  .layout { display: flex; gap: 18px; flex-wrap: wrap; }
+  .grid-wrap { background: #fff; border-radius: 8px; padding: 14px; flex: 1 1 560px;
+               box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .legend { font-size: 12px; color: #55617a; margin-bottom: 8px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+              margin-right: 4px; vertical-align: -1px; }
+  #grid { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; }
+  .cell { aspect-ratio: 1; border-radius: 3px; background: #d8dce3; cursor: pointer;
+          border: 2px solid transparent; }
+  .cell.backfill { background: #7bc47f; }
+  .cell.business { background: #64b5f6; }
+  .cell.susp { background: #ffd54f; }
+  .cell.sel { border-color: #d32f2f; }
+  .panel { background: #fff; border-radius: 8px; padding: 14px; flex: 1 1 320px;
+           box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .panel h2, .demo h2 { font-size: 16px; margin: 0 0 10px; }
+  .panel .row { margin-bottom: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+  #sel-info { font-size: 14px; margin-bottom: 10px; line-height: 1.7; }
+  #sel-info b { font-size: 16px; }
+  textarea { width: 100%; height: 64px; border: 1px solid #c4ccd9; border-radius: 6px;
+             padding: 6px; font-size: 13px; resize: vertical; }
+  pre { background: #101826; color: #c8e6c9; border-radius: 6px; padding: 10px;
+        font-size: 12px; line-height: 1.6; overflow: auto; max-height: 300px; white-space: pre-wrap; }
+  .demo { background: #fff; border-radius: 8px; padding: 14px; margin-top: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .demo p { font-size: 13px; color: #55617a; margin: 6px 0 10px; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; }
+  .tag.ok { background: #e6f4ea; color: #1e7e34; }
+  .tag.bad { background: #fdecea; color: #b3261e; }
+</style>
+</head>
+<body>
+<header>
+  <h1>单卷恢复控制台<small>数据盘尚未恢复完,业务先行读写 · 4 KiB 块 · SQLite 本地存储 · 只读备份镜像</small></h1>
+</header>
+<main>
+  <div class="cards">
+    <div class="card"><div class="num" id="c-present">-</div><div class="lbl">已落盘块</div></div>
+    <div class="card"><div class="num" id="c-missing">-</div><div class="lbl">缺失块</div></div>
+    <div class="card"><div class="num" id="c-progress">-</div><div class="lbl">恢复进度</div></div>
+    <div class="card"><div class="num" id="c-backfill">-</div><div class="lbl">回填状态</div></div>
+    <div class="card"><div class="num" id="c-backup">-</div><div class="lbl">备份连接</div></div>
+    <div class="card"><div class="num" id="c-breads">-</div><div class="lbl">备份读取次数</div></div>
+    <div class="card"><div class="num" id="c-bwrites">-</div><div class="lbl">业务写入次数</div></div>
+    <div class="card"><div class="num" id="c-late">-</div><div class="lbl">迟到数据丢弃</div></div>
+  </div>
+  <div class="bar"><div id="bar-fill"></div></div>
+
+  <div class="controls">
+    <button id="btn-start">▶ 启动回填</button>
+    <button id="btn-disconnect" class="warn">⛔ 断开备份</button>
+    <button id="btn-reset" class="danger">↺ 重置卷</button>
+    <span id="msg"></span>
+  </div>
+
+  <div class="layout">
+    <div class="grid-wrap">
+      <div class="legend">
+        <span><i style="background:#d8dce3"></i>缺失</span>
+        <span><i style="background:#7bc47f"></i>本地(回填)</span>
+        <span><i style="background:#64b5f6"></i>本地(业务写入)</span>
+        <span><i style="background:#ffd54f"></i>已挂起备份读</span>
+        <span>点击块进行选择</span>
+      </div>
+      <div id="grid"></div>
+    </div>
+    <div class="panel">
+      <h2>块操作</h2>
+      <div id="sel-info">未选中块</div>
+      <div class="row">
+        <button id="btn-read" class="ghost">读取</button>
+        <button id="btn-susp" class="warn">挂起备份读</button>
+        <button id="btn-resume" class="ghost">放行备份读</button>
+      </div>
+      <textarea id="wdata" placeholder="写入内容(UTF-8,≤ 4096 字节;不足补 0,凑成整块 4 KiB 落盘)"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="btn-write">整块写入</button>
+      </div>
+      <pre id="blkresult">(读取/写入结果显示在这里)</pre>
+    </div>
+  </div>
+
+  <div class="demo">
+    <h2>演示脚本</h2>
+    <p>一键演示:重置卷 → 挂起块 7 → 启动回填 → 挂起期间读块 7 被拒 / 整块写入成功 →
+       缺块时断开备份被拒 → 放行块 7 → 等待补齐 → 块 7 仍是业务数据(迟到备份数据未覆盖)→
+       断开备份 → 断开后读写正常。</p>
+    <button id="btn-demo">▶ 运行演示</button>
+    <button id="btn-clearlog" class="ghost">清空日志</button>
+    <pre id="demolog">(演示日志)</pre>
+  </div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+let selected = null;
+let lastStates = { present: {}, suspended: [] };
+let blockCount = 256;
+
+async function api(path, method = "GET", body) {
+  const opt = { method, headers: { "Content-Type": "application/json" } };
+  if (body !== undefined) opt.body = JSON.stringify(body);
+  const r = await fetch(path, opt);
+  let j = {};
+  try { j = await r.json(); } catch (e) { j = { message: "(非 JSON 响应)" }; }
+  j._status = r.status;
+  return j;
+}
+
+function setMsg(t) { $("#msg").textContent = t; }
+
+async function refresh() {
+  const st = await api("/api/status");
+  const bl = await api("/api/blocks");
+  lastStates = bl;
+  blockCount = st.block_count;
+  $("#c-present").textContent = st.present + " / " + st.block_count;
+  $("#c-missing").textContent = st.missing;
+  $("#c-progress").textContent = st.progress + "%";
+  $("#c-backfill").textContent = st.backfill_complete ? "已完成" : (st.backfill_running ? "回填中" : "未运行");
+  $("#c-backup").textContent = st.backup_disconnected ? "已断开" : "已连接";
+  $("#c-breads").textContent = st.stats.backup_reads;
+  $("#c-bwrites").textContent = st.stats.business_writes;
+  $("#c-late").textContent = st.stats.late_ignored;
+  $("#bar-fill").style.width = st.progress + "%";
+  renderGrid();
+  renderSelInfo();
+  return st;
+}
+
+function cellClass(i) {
+  if (lastStates.suspended.includes(i)) return "cell susp";
+  const src = lastStates.present[i];
+  if (src === "backfill") return "cell backfill";
+  if (src === "business") return "cell business";
+  return "cell";
+}
+
+function renderGrid() {
+  const g = $("#grid");
+  if (g.childElementCount === 0) {
+    for (let i = 0; i < blockCount; i++) {
+      const d = document.createElement("div");
+      d.dataset.idx = i;
+      d.onclick = () => { selected = i; renderGrid(); renderSelInfo(); };
+      g.appendChild(d);
+    }
+  }
+  for (const d of g.children) {
+    const i = Number(d.dataset.idx);
+    d.className = cellClass(i) + (selected === i ? " sel" : "");
+    d.title = "块 " + i;
+  }
+}
+
+function blockStateText(i) {
+  const parts = [];
+  const src = lastStates.present[i];
+  if (src === "backfill") parts.push('本地(来源:回填)');
+  else if (src === "business") parts.push('本地(来源:业务写入)');
+  else parts.push("缺失");
+  if (lastStates.suspended.includes(i)) parts.push("已挂起备份读");
+  return parts.join(" · ");
+}
+
+function renderSelInfo() {
+  if (selected === null) { $("#sel-info").textContent = "未选中块"; return; }
+  $("#sel-info").innerHTML = "块 <b>" + selected + "</b> — " + blockStateText(selected);
+}
+
+$("#btn-start").onclick = async () => {
+  const j = await api("/api/backfill/start", "POST");
+  setMsg(j.message); refresh();
+};
+$("#btn-disconnect").onclick = async () => {
+  const j = await api("/api/disconnect", "POST");
+  setMsg((j._status === 200 ? "✔ " : "✘ ") + j.message); refresh();
+};
+$("#btn-reset").onclick = async () => {
+  if (!confirm("重置将清空全部本地块,确定?")) return;
+  const j = await api("/api/reset", "POST");
+  setMsg(j.message); refresh();
+};
+$("#btn-read").onclick = async () => {
+  if (selected === null) return;
+  const j = await api("/api/block/" + selected);
+  $("#blkresult").textContent = j._status === 200
+    ? `块 ${j.idx} 来源=${j.source}${j.origin ? "/" + j.origin : ""} 大小=${j.size}B\n内容预览: ${j.text}`
+    : `HTTP ${j._status}: ${j.message}`;
+};
+$("#btn-write").onclick = async () => {
+  if (selected === null) return;
+  const j = await api("/api/block/" + selected + "/write", "POST", { data: $("#wdata").value });
+  $("#blkresult").textContent = `HTTP ${j._status}: ${j.message}`;
+  refresh();
+};
+$("#btn-susp").onclick = async () => {
+  if (selected === null) return;
+  const j = await api("/api/block/" + selected + "/suspend", "POST");
+  setMsg(j.message); refresh();
+};
+$("#btn-resume").onclick = async () => {
+  if (selected === null) return;
+  const j = await api("/api/block/" + selected + "/resume", "POST");
+  setMsg(j.message); refresh();
+};
+
+function slog(t) {
+  $("#demolog").textContent += t + "\n";
+  $("#demolog").scrollTop = $("#demolog").scrollHeight;
+}
+$("#btn-clearlog").onclick = () => { $("#demolog").textContent = ""; };
+
+async function waitUntil(pred, timeoutMs) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    const st = await refresh();
+    if (pred(st)) return true;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return false;
+}
+
+$("#btn-demo").onclick = async () => {
+  const btn = $("#btn-demo");
+  btn.disabled = true;
+  const B = 7;
+  try {
+    slog("=== 演示开始 ===");
+    let j = await api("/api/reset", "POST");
+    slog("0. " + j.message);
+    j = await api(`/api/block/${B}/suspend`, "POST");
+    slog(`1. 挂起块 ${B} 的后台备份读取 → ${j.message}`);
+    j = await api("/api/backfill/start", "POST");
+    slog("2. 启动后台回填 → " + j.message);
+    let r = await api(`/api/block/${B}`);
+    slog(`3. 挂起期间读块 ${B} → HTTP ${r._status}: ${r.message} ✔(缺块且挂起,不读备份)`);
+    const payload = `BUSINESS-WRITE block ${B} @ ${new Date().toLocaleTimeString()}`;
+    r = await api(`/api/block/${B}/write`, "POST", { data: payload });
+    slog(`4. 挂起期间对块 ${B} 提交整块写入 → HTTP ${r._status} ✔`);
+    r = await api(`/api/block/${B}`);
+    slog(`5. 读块 ${B} → 来源=${r.source}/${r.origin} 内容="${r.text}" ✔`);
+    r = await api("/api/disconnect", "POST");
+    slog(`6. 缺块未补齐,尝试断开备份 → HTTP ${r._status}: ${r.message} ✔(被拒绝)`);
+    j = await api(`/api/block/${B}/resume`, "POST");
+    slog(`7. 放行块 ${B} → ${j.message}`);
+    slog("8. 等待回填完成 ...");
+    const done = await waitUntil(st => st.missing === 0, 60000);
+    if (!done) { slog("✘ 等待回填超时"); return; }
+    slog("   回填完成,无缺块");
+    r = await api(`/api/block/${B}`);
+    slog(`9. 补齐后块 ${B} 仍是业务数据:"${r.text}" ✔(迟到的备份数据未覆盖)`);
+    r = await api("/api/disconnect", "POST");
+    slog(`10. 补齐后断开备份 → HTTP ${r._status}: ${r.message} ✔`);
+    r = await api("/api/block/3");
+    slog(`11. 断开后读块 3 → 来源=${r.source} 内容="${r.text}" ✔`);
+    r = await api("/api/block/3/write", "POST", { data: "POST-DISCONNECT-WRITE" });
+    r = await api("/api/block/3");
+    slog(`12. 断开后改写块 3 再读 → "${r.text}" ✔ 数据盘仍可读写`);
+    slog("=== 演示完成 ===");
+  } catch (e) {
+    slog("✘ 演示异常: " + e);
+  } finally {
+    btn.disabled = false;
+    refresh();
+  }
+};
+
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

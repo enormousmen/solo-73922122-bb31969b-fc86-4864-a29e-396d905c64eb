@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+app/data/
+app/backup.img
+*.db
+*.db-wal
+*.db-shm

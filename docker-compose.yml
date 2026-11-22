@@ -1,0 +1,12 @@
+services:
+  recovery:
+    build: ./app
+    image: volume-recovery:dev
+    ports:
+      - "8080:5000"
+    volumes:
+      - recovery-data:/data
+    restart: unless-stopped
+
+volumes:
+  recovery-data:
