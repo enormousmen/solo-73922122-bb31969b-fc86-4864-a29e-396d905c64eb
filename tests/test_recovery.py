@@ -70,7 +70,9 @@ def test_suspend_write_resume_and_late_backup_never_overwrites(client):
     client.post("/api/backfill/start")
     # 其余块都补齐,只剩被挂起的 7
     assert wait_for(lambda: status(client)["missing"] == 1)
-    assert 7 in status(client)["suspended"]
+    assert status(client)["suspended_count"] == 1
+    seg = client.get("/api/blocks?start=0&count=32").get_json()
+    assert 7 in seg["suspended"]
 
     # 挂起期间:缺块读取被拒(不读备份)
     r = client.get("/api/block/7")

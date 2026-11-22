@@ -28,6 +28,7 @@
   button.warn { background: #d97706; }
   button.danger { background: #b3261e; }
   button.ghost { background: #5b6b82; }
+  button.small { padding: 5px 10px; font-size: 13px; }
   #msg { font-size: 13px; color: #37475e; }
   .layout { display: flex; gap: 18px; flex-wrap: wrap; }
   .grid-wrap { background: #fff; border-radius: 8px; padding: 14px; flex: 1 1 560px;
@@ -35,6 +36,9 @@
   .legend { font-size: 12px; color: #55617a; margin-bottom: 8px; display: flex; gap: 14px; flex-wrap: wrap; }
   .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px;
               margin-right: 4px; vertical-align: -1px; }
+  .segbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px;
+            font-size: 13px; color: #37475e; }
+  .segbar input { width: 110px; padding: 5px 8px; border: 1px solid #c4ccd9; border-radius: 6px; }
   #grid { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; }
   .cell { aspect-ratio: 1; border-radius: 3px; background: #d8dce3; cursor: pointer;
           border: 2px solid transparent; }
@@ -42,6 +46,7 @@
   .cell.business { background: #64b5f6; }
   .cell.susp { background: #ffd54f; }
   .cell.sel { border-color: #d32f2f; }
+  .seg-note { font-size: 12px; color: #7a869c; margin-top: 8px; }
   .panel { background: #fff; border-radius: 8px; padding: 14px; flex: 1 1 320px;
            box-shadow: 0 1px 3px rgba(0,0,0,.08); }
   .panel h2, .demo h2 { font-size: 16px; margin: 0 0 10px; }
@@ -55,9 +60,6 @@
   .demo { background: #fff; border-radius: 8px; padding: 14px; margin-top: 18px;
           box-shadow: 0 1px 3px rgba(0,0,0,.08); }
   .demo p { font-size: 13px; color: #55617a; margin: 6px 0 10px; }
-  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; }
-  .tag.ok { background: #e6f4ea; color: #1e7e34; }
-  .tag.bad { background: #fdecea; color: #b3261e; }
 </style>
 </head>
 <body>
@@ -71,6 +73,10 @@
     <div class="card"><div class="num" id="c-progress">-</div><div class="lbl">恢复进度</div></div>
     <div class="card"><div class="num" id="c-backfill">-</div><div class="lbl">回填状态</div></div>
     <div class="card"><div class="num" id="c-backup">-</div><div class="lbl">备份连接</div></div>
+    <div class="card"><div class="num" id="c-susp">-</div><div class="lbl">挂起块数</div></div>
+    <div class="card"><div class="num" id="c-cursor">-</div><div class="lbl">选块游标</div></div>
+    <div class="card"><div class="num" id="c-segs">-</div><div class="lbl">占用区间行数</div></div>
+    <div class="card"><div class="num" id="c-hops">-</div><div class="lbl">整段跳过次数</div></div>
     <div class="card"><div class="num" id="c-breads">-</div><div class="lbl">备份读取次数</div></div>
     <div class="card"><div class="num" id="c-bwrites">-</div><div class="lbl">业务写入次数</div></div>
     <div class="card"><div class="num" id="c-late">-</div><div class="lbl">迟到数据丢弃</div></div>
@@ -86,14 +92,26 @@
 
   <div class="layout">
     <div class="grid-wrap">
-      <div class="legend">
+      <div class="segbar">
+        <span>块状态分段加载:</span>
+        <button id="btn-seg-prev" class="ghost small">上一段</button>
+        <span id="seg-label">[0, 0)</span>
+        <button id="btn-seg-next" class="ghost small">下一段</button>
+        <span>跳转到块号</span>
+        <input id="jump-idx" type="number" min="0" placeholder="如 4096">
+        <button id="btn-jump" class="small">跳转</button>
+      </div>
+      <div id="grid"></div>
+      <div class="seg-note" id="seg-note">
+        仅当前段状态会被加载;页面上方进度来自聚合计数,不随分段加载。
+      </div>
+      <div class="legend" style="margin-top:8px">
         <span><i style="background:#d8dce3"></i>缺失</span>
         <span><i style="background:#7bc47f"></i>本地(回填)</span>
         <span><i style="background:#64b5f6"></i>本地(业务写入)</span>
         <span><i style="background:#ffd54f"></i>已挂起备份读</span>
         <span>点击块进行选择</span>
       </div>
-      <div id="grid"></div>
     </div>
     <div class="panel">
       <h2>块操作</h2>
@@ -113,9 +131,10 @@
 
   <div class="demo">
     <h2>演示脚本</h2>
-    <p>一键演示:重置卷 → 挂起块 7 → 启动回填 → 挂起期间读块 7 被拒 / 整块写入成功 →
-       缺块时断开备份被拒 → 放行块 7 → 等待补齐 → 块 7 仍是业务数据(迟到备份数据未覆盖)→
-       断开备份 → 断开后读写正常。</p>
+    <p>一键演示:重置卷 → 挂起连续块 7、8 → 启动回填(整段跳过挂起段,继续补齐后面的块,
+       只剩挂起块时后台继续等放行)→ 挂起期间读块 7 被拒 / 对块 7 整块写入成功 →
+       仍有挂起缺块时断开备份被拒 → 放行块 8(游标回拨,后台回头补齐)→
+       块 7 仍是业务数据、块 8 已补齐 → 断开备份 → 断开后读写正常。</p>
     <button id="btn-demo">▶ 运行演示</button>
     <button id="btn-clearlog" class="ghost">清空日志</button>
     <pre id="demolog">(演示日志)</pre>
@@ -123,8 +142,10 @@
 </main>
 <script>
 const $ = s => document.querySelector(s);
+const SEG = 256;               // 每段显示的块数(16 x 16)
+let segStart = 0;              // 当前段起始块号
+let segState = { start: 0, end: 0, present: {}, suspended: [] };
 let selected = null;
-let lastStates = { present: {}, suspended: [] };
 let blockCount = 256;
 
 async function api(path, method = "GET", body) {
@@ -139,28 +160,40 @@ async function api(path, method = "GET", body) {
 
 function setMsg(t) { $("#msg").textContent = t; }
 
+async function loadSegment(start) {
+  const j = await api(`/api/blocks?start=${start}&count=${SEG}`);
+  if (j._status !== 200) return;
+  segState = j;
+  segStart = j.start;
+  blockCount = j.block_count;
+  renderGrid();
+  renderSelInfo();
+}
+
 async function refresh() {
   const st = await api("/api/status");
-  const bl = await api("/api/blocks");
-  lastStates = bl;
   blockCount = st.block_count;
   $("#c-present").textContent = st.present + " / " + st.block_count;
   $("#c-missing").textContent = st.missing;
   $("#c-progress").textContent = st.progress + "%";
-  $("#c-backfill").textContent = st.backfill_complete ? "已完成" : (st.backfill_running ? "回填中" : "未运行");
+  $("#c-backfill").textContent = st.backfill_complete ? "已完成"
+    : (st.backfill_running ? "回填中" : "未运行");
   $("#c-backup").textContent = st.backup_disconnected ? "已断开" : "已连接";
+  $("#c-susp").textContent = st.suspended_count;
+  $("#c-cursor").textContent = st.backfill_cursor;
+  $("#c-segs").textContent = st.segment_rows;
+  $("#c-hops").textContent = st.stats.segment_hops;
   $("#c-breads").textContent = st.stats.backup_reads;
   $("#c-bwrites").textContent = st.stats.business_writes;
   $("#c-late").textContent = st.stats.late_ignored;
   $("#bar-fill").style.width = st.progress + "%";
-  renderGrid();
-  renderSelInfo();
+  await loadSegment(segStart);
   return st;
 }
 
 function cellClass(i) {
-  if (lastStates.suspended.includes(i)) return "cell susp";
-  const src = lastStates.present[i];
+  if (segState.suspended.includes(i)) return "cell susp";
+  const src = segState.present[i];
   if (src === "backfill") return "cell backfill";
   if (src === "business") return "cell business";
   return "cell";
@@ -168,34 +201,43 @@ function cellClass(i) {
 
 function renderGrid() {
   const g = $("#grid");
-  if (g.childElementCount === 0) {
-    for (let i = 0; i < blockCount; i++) {
-      const d = document.createElement("div");
-      d.dataset.idx = i;
-      d.onclick = () => { selected = i; renderGrid(); renderSelInfo(); };
-      g.appendChild(d);
-    }
+  const cells = segState.end - segState.start;
+  while (g.childElementCount > cells) g.removeChild(g.lastChild);
+  while (g.childElementCount < cells) {
+    const d = document.createElement("div");
+    d.onclick = () => {
+      selected = Number(d.dataset.idx);
+      renderGrid(); renderSelInfo();
+    };
+    g.appendChild(d);
   }
-  for (const d of g.children) {
-    const i = Number(d.dataset.idx);
+  for (let k = 0; k < cells; k++) {
+    const i = segState.start + k;
+    const d = g.children[k];
+    d.dataset.idx = i;
     d.className = cellClass(i) + (selected === i ? " sel" : "");
     d.title = "块 " + i;
   }
+  $("#seg-label").textContent = `[${segState.start}, ${segState.end}) · 共 ${blockCount} 块`;
+  $("#btn-seg-prev").disabled = segState.start <= 0;
+  $("#btn-seg-next").disabled = segState.end >= blockCount;
 }
 
 function blockStateText(i) {
   const parts = [];
-  const src = lastStates.present[i];
-  if (src === "backfill") parts.push('本地(来源:回填)');
-  else if (src === "business") parts.push('本地(来源:业务写入)');
-  else parts.push("缺失");
-  if (lastStates.suspended.includes(i)) parts.push("已挂起备份读");
+  const src = segState.present[i];
+  if (src === "backfill") parts.push("本地(来源:回填)");
+  else if (src === "business") parts.push("本地(来源:业务写入)");
+  else parts.push(segState.suspended.includes(i) ? "缺失(已挂起备份读)" : "缺失");
+  if (segState.suspended.includes(i) && src) parts.push("已挂起备份读");
   return parts.join(" · ");
 }
 
 function renderSelInfo() {
   if (selected === null) { $("#sel-info").textContent = "未选中块"; return; }
-  $("#sel-info").innerHTML = "块 <b>" + selected + "</b> — " + blockStateText(selected);
+  const inSeg = selected >= segState.start && selected < segState.end;
+  $("#sel-info").innerHTML = "块 <b>" + selected + "</b> — "
+    + (inSeg ? blockStateText(selected) : "不在当前段(跳转后显示状态)");
 }
 
 $("#btn-start").onclick = async () => {
@@ -209,8 +251,23 @@ $("#btn-disconnect").onclick = async () => {
 $("#btn-reset").onclick = async () => {
   if (!confirm("重置将清空全部本地块,确定?")) return;
   const j = await api("/api/reset", "POST");
+  selected = null; segStart = 0;
   setMsg(j.message); refresh();
 };
+$("#btn-seg-prev").onclick = () => loadSegment(Math.max(0, segState.start - SEG));
+$("#btn-seg-next").onclick = () => loadSegment(segState.end);
+$("#btn-jump").onclick = async () => {
+  const n = Number($("#jump-idx").value);
+  if (!Number.isInteger(n) || n < 0 || n >= blockCount) {
+    setMsg("块号需在 0 .. " + (blockCount - 1) + " 之间"); return;
+  }
+  selected = n;
+  await loadSegment(n - (n % SEG));
+  $("#sel-info").innerHTML = "块 <b>" + n + "</b> — " + blockStateText(n);
+  setMsg("已跳转到块 " + n + " 所在段");
+};
+$("#jump-idx").addEventListener("keydown", e => { if (e.key === "Enter") $("#btn-jump").click(); });
+
 $("#btn-read").onclick = async () => {
   if (selected === null) return;
   const j = await api("/api/block/" + selected);
@@ -245,48 +302,73 @@ async function waitUntil(pred, timeoutMs) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     const st = await refresh();
-    if (pred(st)) return true;
-    await new Promise(r => setTimeout(r, 300));
+    if (pred(st)) return st;
+    await new Promise(r => setTimeout(r, 250));
   }
-  return false;
+  return null;
+}
+
+async function jumpTo(n) {
+  selected = n;
+  await loadSegment(n - (n % SEG));
+  $("#sel-info").innerHTML = "块 <b>" + n + "</b> — " + blockStateText(n);
 }
 
 $("#btn-demo").onclick = async () => {
   const btn = $("#btn-demo");
   btn.disabled = true;
-  const B = 7;
+  const B = 7, C = 8;   // 两个连续的挂起缺块;7 写入业务数据,8 留到放行后由后台补齐
   try {
     slog("=== 演示开始 ===");
     let j = await api("/api/reset", "POST");
     slog("0. " + j.message);
+    await jumpTo(B);
     j = await api(`/api/block/${B}/suspend`, "POST");
     slog(`1. 挂起块 ${B} 的后台备份读取 → ${j.message}`);
+    j = await api(`/api/block/${C}/suspend`, "POST");
+    slog(`1b. 再挂起相邻块 ${C}(形成连续挂起段 7-8)→ ${j.message}`);
     j = await api("/api/backfill/start", "POST");
     slog("2. 启动后台回填 → " + j.message);
+
+    let st = await waitUntil(s => s.backfill_cursor > C + 20, 30000);
+    slog(st ? `3. 回填越过挂起段(选块游标=${st.backfill_cursor},整段跳过累计=${st.stats.segment_hops}) ✔`
+            : "✘ 回填未越过挂起段");
+    slog("4. 等待其余块补齐(仅剩挂起的块 " + B + "、" + C + ")...");
+    st = await waitUntil(s => s.missing === 2 && s.backfill_running, 60000);
+    slog(st ? `   仅剩 ${st.missing} 个缺块且回填仍在运行(后台继续等放行) ✔`
+            : "✘ 未达到仅剩挂起块的状态");
+
     let r = await api(`/api/block/${B}`);
-    slog(`3. 挂起期间读块 ${B} → HTTP ${r._status}: ${r.message} ✔(缺块且挂起,不读备份)`);
+    slog(`5. 挂起期间读块 ${B} → HTTP ${r._status}: ${r.message} ✔(缺块且挂起,不读备份)`);
     const payload = `BUSINESS-WRITE block ${B} @ ${new Date().toLocaleTimeString()}`;
     r = await api(`/api/block/${B}/write`, "POST", { data: payload });
-    slog(`4. 挂起期间对块 ${B} 提交整块写入 → HTTP ${r._status} ✔`);
+    slog(`6. 挂起期间对块 ${B} 提交整块写入 → HTTP ${r._status} ✔`);
     r = await api(`/api/block/${B}`);
-    slog(`5. 读块 ${B} → 来源=${r.source}/${r.origin} 内容="${r.text}" ✔`);
+    slog(`7. 读块 ${B} → 来源=${r.source}/${r.origin} 内容="${r.text}" ✔`);
     r = await api("/api/disconnect", "POST");
-    slog(`6. 缺块未补齐,尝试断开备份 → HTTP ${r._status}: ${r.message} ✔(被拒绝)`);
+    slog(`8. 块 ${C} 仍是挂起缺块,尝试断开备份 → HTTP ${r._status}: ${r.message} ✔(被拒绝)`);
+
+    await jumpTo(C);
+    j = await api(`/api/block/${C}/resume`, "POST");
+    slog(`9. 放行块 ${C} → ${j.message}(游标回拨,后台回头补齐)`);
     j = await api(`/api/block/${B}/resume`, "POST");
-    slog(`7. 放行块 ${B} → ${j.message}`);
-    slog("8. 等待回填完成 ...");
-    const done = await waitUntil(st => st.missing === 0, 60000);
-    if (!done) { slog("✘ 等待回填超时"); return; }
-    slog("   回填完成,无缺块");
+    slog(`9b. 放行块 ${B} → ${j.message}(块 ${B} 已有业务数据,无需再回填)`);
+    st = await waitUntil(s => s.missing === 0 && !s.backfill_running, 60000);
+    if (!st) { slog("✘ 等待回填完成超时"); return; }
+    slog(`10. 回填完成,无缺块(已落盘 ${st.present}/${st.block_count})`);
+
     r = await api(`/api/block/${B}`);
-    slog(`9. 补齐后块 ${B} 仍是业务数据:"${r.text}" ✔(迟到的备份数据未覆盖)`);
+    slog(`11. 补齐后块 ${B} 仍是业务数据:"${r.text}" ✔(迟到的备份数据未覆盖)`);
+    r = await api(`/api/block/${C}`);
+    slog(`12. 放行后的块 ${C} 来源=${r.source}/${r.origin} ✔(后台回头补齐)`);
     r = await api("/api/disconnect", "POST");
-    slog(`10. 补齐后断开备份 → HTTP ${r._status}: ${r.message} ✔`);
+    slog(`13. 补齐后断开备份 → HTTP ${r._status}: ${r.message} ✔`);
+    await jumpTo(3);
     r = await api("/api/block/3");
-    slog(`11. 断开后读块 3 → 来源=${r.source} 内容="${r.text}" ✔`);
+    slog(`14. 断开后读块 3 → 来源=${r.source} 内容="${r.text}" ✔`);
     r = await api("/api/block/3/write", "POST", { data: "POST-DISCONNECT-WRITE" });
     r = await api("/api/block/3");
-    slog(`12. 断开后改写块 3 再读 → "${r.text}" ✔ 数据盘仍可读写`);
+    slog(`15. 断开后改写块 3 再读 → "${r.text}" ✔ 数据盘仍可读写`);
     slog("=== 演示完成 ===");
   } catch (e) {
     slog("✘ 演示异常: " + e);
